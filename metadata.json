@@ -1,0 +1,6 @@
+{
+  "name": "AI Code & Research",
+  "description": "Perplexity-style conversational AI chat assistant for coding and research.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
