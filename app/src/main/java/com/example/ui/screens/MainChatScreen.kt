@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -36,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.data.remote.SyncStatus
 import com.example.data.local.MessageEntity
 import com.example.data.remote.ResearchLink
 import com.example.ui.viewmodel.ChatViewModel
@@ -124,13 +127,19 @@ fun MainChatScreen(
     // Export history state controller
     var isExportMenuOpen by remember { mutableStateOf(false) }
 
+    var isSearchSettingsSheetOpen by remember { mutableStateOf(false) }
+    val activeSearchProvider by viewModel.activeSearchProvider.collectAsState()
+    val syncStatus by viewModel.syncStatus.collectAsState()
+    val connStatus by viewModel.connectionStatus.collectAsState()
+    val messageBusTrigger by com.example.util.DiagnosticLogger.messageBus.collectAsState(initial = 0L)
+
     // Keep editing title synced
     LaunchedEffect(convTitle) {
         editedTitleInput = convTitle
     }
 
     // AutoScroll to latest messages on change
-    LaunchedEffect(messages.size, isAnalyzing) {
+    LaunchedEffect(messages.size, isAnalyzing, messageBusTrigger) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
@@ -214,48 +223,57 @@ fun MainChatScreen(
                         }
                     }
 
+                    // Streaming Connection Status Indicator
+                    val connTint = when (connStatus) {
+                        "Connected" -> Color(0xFF4CAF50)
+                        "Connecting..." -> Color(0xFFFFA000)
+                        else -> MaterialTheme.colorScheme.outline
+                    }
+                    Text(
+                        text = connStatus,
+                        fontSize = 10.sp,
+                        color = connTint,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .padding(end = 4.dp)
+                    )
+
+                    // Sync Status Indicator
+                    val syncIconTint = when (syncStatus) {
+                        SyncStatus.SYNCING -> Color(0xFF1E88E5)
+                        SyncStatus.SYNCED -> Color(0xFF4CAF50)
+                        SyncStatus.ERROR -> Color(0xFFD32F2F)
+                        else -> MaterialTheme.colorScheme.outline
+                    }
+                    val syncIcon = when (syncStatus) {
+                        SyncStatus.SYNCING -> Icons.Default.Sync
+                        SyncStatus.SYNCED -> Icons.Default.CloudDone
+                        SyncStatus.ERROR -> Icons.Default.CloudOff
+                        else -> Icons.Default.CloudQueue
+                    }
+                    IconButton(onClick = {}) {
+                        Icon(
+                            imageVector = syncIcon,
+                            contentDescription = "Cloud Auth & Sync Status",
+                            tint = syncIconTint
+                        )
+                    }
+
+                    // Search toggle
+                    IconButton(onClick = { isSearchSettingsSheetOpen = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search Settings"
+                        )
+                    }
+
                     // Theme toggle
                     IconButton(onClick = { viewModel.toggleTheme() }) {
                         Icon(
                             imageVector = if (darkThemeState) Icons.Default.LightMode else Icons.Default.DarkMode,
                             contentDescription = "Toggle mode theme"
                         )
-                    }
-
-                    // Export dialogue option
-                    Box {
-                        IconButton(
-                            onClick = { isExportMenuOpen = true },
-                            enabled = messages.isNotEmpty(),
-                            modifier = Modifier.testTag("export_conversation_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FileDownload,
-                                contentDescription = "Export History Options"
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = isExportMenuOpen,
-                            onDismissRequest = { isExportMenuOpen = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Export as Markdown (.md)", fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                onClick = {
-                                    isExportMenuOpen = false
-                                    exportConversation(messages, convTitle, asJson = false, context = context)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Export as JSON block (.json)", fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                onClick = {
-                                    isExportMenuOpen = false
-                                    exportConversation(messages, convTitle, asJson = true, context = context)
-                                }
-                            )
-                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -270,7 +288,41 @@ fun MainChatScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .background(MaterialTheme.colorScheme.background)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { 
+                            if (messages.isNotEmpty()) {
+                                isExportMenuOpen = true
+                            }
+                        }
+                    )
+                }
         ) {
+            // Export DropdownMenu container
+            Box(modifier = Modifier.align(Alignment.Center)) {
+                DropdownMenu(
+                    expanded = isExportMenuOpen,
+                    onDismissRequest = { isExportMenuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Export as Markdown (.md)", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        onClick = {
+                            isExportMenuOpen = false
+                            exportConversation(messages, convTitle, asJson = false, context = context)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Export as JSON block (.json)", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        onClick = {
+                            isExportMenuOpen = false
+                            exportConversation(messages, convTitle, asJson = true, context = context)
+                        }
+                    )
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -398,8 +450,11 @@ fun MainChatScreen(
                         key = { it.id },
                         footerContent = {
                             if (isAnalyzing) {
-                                item {
-                                    MessageBubbleSkeleton(isUser = false, showTypingDots = true)
+                                val latestMessageIsModelStreaming = messages.lastOrNull()?.let { it.role == "model" && it.content.isNotBlank() } ?: false
+                                if (!latestMessageIsModelStreaming) {
+                                    item {
+                                        MessageBubbleSkeleton(isUser = false, showTypingDots = true)
+                                    }
                                 }
                             }
                         }
@@ -461,47 +516,110 @@ fun MainChatScreen(
                                         ) {
                                             Column(modifier = Modifier.padding(12.dp)) {
                                                 if (isUser) {
-                                                    Text(
-                                                        text = msg.content,
-                                                        color = Color.White,
-                                                        fontSize = baseFontSize,
-                                                        lineHeight = 20.sp
-                                                    )
-                                                } else {
-                                                    // Dynamic Code/Text block split parsing renderer
-                                                    val messageBlocks = splitMessageContent(msg.content)
-                                                    messageBlocks.forEach { block ->
+                                                    val blocks = remember(msg.content) { splitMessageContent(msg.content) }
+                                                    blocks.forEach { block ->
                                                         when (block) {
                                                             is MessageBlock.Text -> {
-                                                                MarkdownText(
-                                                                    text = block.content,
-                                                                    isDark = darkThemeState,
-                                                                    baseFontSize = baseFontSize,
-                                                                    textColor = MaterialTheme.colorScheme.onSurface,
-                                                                    modifier = Modifier.padding(bottom = 6.dp)
-                                                                )
+                                                                if (block.content.isNotBlank()) {
+                                                                    MarkwonMarkdownText(
+                                                                        markdown = block.content,
+                                                                        textColor = Color.White
+                                                                    )
+                                                                }
                                                             }
                                                             is MessageBlock.Code -> {
-                                                                if (isSyntaxHighlightingEnabled) {
+                                                                GenerativeUiContainer(
+                                                                    jsonCode = block.code,
+                                                                    modifier = Modifier.padding(vertical = 4.dp)
+                                                                ) {
                                                                     CodeBlockView(
                                                                         language = block.language,
                                                                         code = block.code,
-                                                                        modifier = Modifier.padding(vertical = 8.dp)
+                                                                        modifier = Modifier.padding(vertical = 4.dp)
                                                                     )
-                                                                } else {
-                                                                    // Monospace fallback
-                                                                     Box(
-                                                                        modifier = Modifier
-                                                                            .fillMaxWidth()
-                                                                            .background(Color.Black.copy(alpha = 0.08f))
-                                                                            .padding(8.dp)
-                                                                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                                                                    ) {
-                                                                        Text(
-                                                                            text = block.code,
-                                                                            fontSize = 13.sp,
-                                                                            fontFamily = FontFamily.Monospace
-                                                                        )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    val isCurrentlyStreaming = msg.id == messages.lastOrNull()?.id && isAnalyzing
+                                                    if (isCurrentlyStreaming) {
+                                                        val blocks = remember(msg.content) { splitMessageContent(msg.content) }
+                                                        val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+                                                        val cursorAlpha by infiniteTransition.animateFloat(
+                                                            initialValue = 0f,
+                                                            targetValue = 1f,
+                                                            animationSpec = infiniteRepeatable(
+                                                                animation = tween(durationMillis = 500, easing = LinearEasing),
+                                                                repeatMode = RepeatMode.Reverse
+                                                            ),
+                                                            label = "cursorBlink"
+                                                        )
+                                                        val showCursor = cursorAlpha > 0.5f
+
+                                                        Column {
+                                                            blocks.forEachIndexed { idx, block ->
+                                                                when (block) {
+                                                                    is MessageBlock.Text -> {
+                                                                        val txt = if (idx == blocks.lastIndex) {
+                                                                            block.content + (if (showCursor) " ▎" else "  ")
+                                                                        } else {
+                                                                            block.content
+                                                                        }
+                                                                        if (txt.isNotBlank() || idx == blocks.lastIndex) {
+                                                                            MarkwonMarkdownText(
+                                                                                markdown = txt,
+                                                                                textColor = MaterialTheme.colorScheme.onSurface,
+                                                                                modifier = Modifier.padding(bottom = 6.dp)
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                    is MessageBlock.Code -> {
+                                                                        GenerativeUiContainer(
+                                                                            jsonCode = block.code,
+                                                                            modifier = Modifier.padding(vertical = 4.dp)
+                                                                        ) {
+                                                                            CodeBlockView(
+                                                                                language = block.language,
+                                                                                code = block.code,
+                                                                                modifier = Modifier.padding(vertical = 4.dp)
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        TypingAnimatedTextWrapper(
+                                                            text = msg.content,
+                                                            isModel = true,
+                                                            msgTimestamp = msg.timestamp
+                                                        ) { animatedText ->
+                                                            val blocks = remember(animatedText) { splitMessageContent(animatedText) }
+                                                            Column {
+                                                                blocks.forEach { block ->
+                                                                    when (block) {
+                                                                        is MessageBlock.Text -> {
+                                                                            if (block.content.isNotBlank()) {
+                                                                                MarkwonMarkdownText(
+                                                                                    markdown = block.content,
+                                                                                    textColor = MaterialTheme.colorScheme.onSurface,
+                                                                                    modifier = Modifier.padding(bottom = 6.dp)
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                        is MessageBlock.Code -> {
+                                                                            GenerativeUiContainer(
+                                                                                jsonCode = block.code,
+                                                                                modifier = Modifier.padding(vertical = 4.dp)
+                                                                            ) {
+                                                                                CodeBlockView(
+                                                                                    language = block.language,
+                                                                                    code = block.code,
+                                                                                    modifier = Modifier.padding(vertical = 4.dp)
+                                                                                )
+                                                                            }
+                                                                        }
                                                                     }
                                                                 }
                                                             }
@@ -703,8 +821,10 @@ fun MainChatScreen(
                     selectedContextEntries = selectedContextEntries,
                     onClearContext = { viewModel.clearContextSelections() },
                     onAttachClick = { isAttachPopupOpen = true },
+                    onSearchClick = { isSearchSettingsSheetOpen = true },
                     suggestions = suggestions,
                     onSelectSuggestion = { viewModel.appendSuggestion(it) },
+                    activeSearchProvider = activeSearchProvider,
                     modifier = Modifier
                 )
             }
@@ -785,6 +905,159 @@ fun MainChatScreen(
                 }
             }
         )
+    }
+
+    if (isSearchSettingsSheetOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { isSearchSettingsSheetOpen = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "Web Search Engine Settings",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
+                Text(
+                    text = "Choose a search engine to power real-time internet research capabilities for AI responses. Ensure you have provided API keys in AI Settings.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Search options toggle
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setActiveSearchProvider("auto") }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = activeSearchProvider == "auto",
+                            onClick = { viewModel.setActiveSearchProvider("auto") },
+                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Auto (Default)", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Fallback to Wikipedia if other APIs are unavailable", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setActiveSearchProvider("tavily") }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = activeSearchProvider == "tavily",
+                            onClick = { viewModel.setActiveSearchProvider("tavily") },
+                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Tavily AI Search", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Specializes in comprehensive AI-curated research responses", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setActiveSearchProvider("brave") }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = activeSearchProvider == "brave",
+                            onClick = { viewModel.setActiveSearchProvider("brave") },
+                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Brave Search API", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Fast web-scale traditional search results parsing", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setActiveSearchProvider("wikipedia") }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = activeSearchProvider == "wikipedia",
+                            onClick = { viewModel.setActiveSearchProvider("wikipedia") },
+                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Wikipedia Free Search API", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Access articles recursively; No API key required.", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setActiveSearchProvider("google") }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = activeSearchProvider == "google",
+                            onClick = { viewModel.setActiveSearchProvider("google") },
+                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Google Search API", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Built-in native Google Search grounding for Gemini", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setActiveSearchProvider("none") }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = activeSearchProvider == "none",
+                            onClick = { viewModel.setActiveSearchProvider("none") },
+                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.error)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Disable Web Search", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Queries rely strictly on model knowledge and imported documents", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { isSearchSettingsSheetOpen = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Done")
+                }
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
     }
 }
 
@@ -894,8 +1167,10 @@ fun CustomChatInput(
     selectedContextEntries: Set<Long>,
     onClearContext: () -> Unit,
     onAttachClick: () -> Unit,
+    onSearchClick: () -> Unit,
     suggestions: List<String>,
     onSelectSuggestion: (String) -> Unit,
+    activeSearchProvider: String,
     modifier: Modifier = Modifier
 ) {
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -951,6 +1226,37 @@ fun CustomChatInput(
                     }
                 }
             }
+        }
+
+        // Web Search active visual indicator
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onSearchClick() }
+                .padding(vertical = 2.dp, horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val (iconTint, textStr) = when (activeSearchProvider) {
+                "tavily" -> Color(0xFF9C27B0) to "Tavily Search Active"
+                "brave" -> Color(0xFFFF5722) to "Brave Search Active"
+                "wikipedia" -> Color(0xFF000000) to "Wikipedia Search Active"
+                "google" -> Color(0xFF4285F4) to "Google Search Grounding"
+                "none" -> MaterialTheme.colorScheme.outline to "Web Search Disabled"
+                else -> Color(0xFF1E88E5) to "Auto Search (Wikipedia/Tavily/etc)" 
+            }
+            Icon(
+                imageVector = Icons.Default.Public,
+                contentDescription = "Search Provider Indicator",
+                tint = if (activeSearchProvider == "wikipedia") MaterialTheme.colorScheme.onSurface else iconTint,
+                modifier = Modifier.size(12.dp)
+            )
+            Text(
+                textStr,
+                fontSize = 11.sp,
+                color = if (activeSearchProvider == "wikipedia") MaterialTheme.colorScheme.onSurface else iconTint,
+                fontWeight = FontWeight.Medium
+            )
         }
 
         // Display active Context items grounded
@@ -1208,5 +1514,35 @@ fun exportConversation(
     } catch (e: Exception) {
         Toast.makeText(context, "Export failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }
+}
+
+@Composable
+fun TypingAnimatedTextWrapper(
+    text: String,
+    isModel: Boolean,
+    msgTimestamp: Long,
+    content: @Composable (String) -> Unit
+) {
+    // Only animate if it's from the model and was created within the last 5 seconds
+    val isNew = remember { System.currentTimeMillis() - msgTimestamp < 5000 }
+    if (!isModel || !isNew) {
+        content(text)
+        return
+    }
+
+    var displayedLength by remember { mutableStateOf(0) }
+
+    LaunchedEffect(text) {
+        if (displayedLength < text.length) {
+            val lengthToAnimate = text.length - displayedLength
+            val delayPerChar = (2500L / text.length.coerceAtLeast(1)).coerceIn(5L, 30L)
+            for (i in displayedLength..text.length) {
+                displayedLength = i
+                kotlinx.coroutines.delay(delayPerChar)
+            }
+        }
+    }
+
+    content(text.substring(0, displayedLength))
 }
 

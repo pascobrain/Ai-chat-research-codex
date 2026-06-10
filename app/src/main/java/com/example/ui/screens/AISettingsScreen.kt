@@ -44,6 +44,9 @@ fun AISettingsScreen(
     val systemPromptState by viewModel.systemPrompt.collectAsState()
     val temperatureState by viewModel.temperature.collectAsState()
     val maxTokensState by viewModel.maxTokens.collectAsState()
+    val tavilyApiKeyState by viewModel.tavilyApiKey.collectAsState()
+    val braveApiKeyState by viewModel.braveApiKey.collectAsState()
+    val thinkingLevelState by viewModel.geminiThinkingLevel.collectAsState()
 
     // Connection testing
     val isTestingConnection by viewModel.isValidating.collectAsState()
@@ -53,26 +56,32 @@ fun AISettingsScreen(
     var apiProtocol by remember { mutableStateOf(apiProtocolState) }
     var apiEndpoint by remember { mutableStateOf(apiEndpointState) }
     var apiKey by remember { mutableStateOf(apiKeyState) }
+    var searchTavilyKey by remember { mutableStateOf(tavilyApiKeyState) }
+    var searchBraveKey by remember { mutableStateOf(braveApiKeyState) }
     var selectedModel by remember { mutableStateOf(selectedModelState) }
     var systemPrompt by remember { mutableStateOf(systemPromptState) }
     var tempVal by remember { mutableStateOf(temperatureState) }
     var maxTokens by remember { mutableStateOf(maxTokensState.toString()) }
+    var thinkingLevel by remember { mutableStateOf(thinkingLevelState) }
     var isApiKeyVisible by remember { mutableStateOf(false) }
 
     // Sync state
-    LaunchedEffect(apiProtocolState, apiEndpointState, apiKeyState, selectedModelState, systemPromptState, temperatureState, maxTokensState) {
+    LaunchedEffect(apiProtocolState, apiEndpointState, apiKeyState, selectedModelState, systemPromptState, temperatureState, maxTokensState, tavilyApiKeyState, braveApiKeyState, thinkingLevelState) {
         apiProtocol = apiProtocolState
         apiEndpoint = apiEndpointState
         apiKey = apiKeyState
+        searchTavilyKey = tavilyApiKeyState
+        searchBraveKey = braveApiKeyState
         selectedModel = selectedModelState
         systemPrompt = systemPromptState
         tempVal = temperatureState
         maxTokens = maxTokensState.toString()
+        thinkingLevel = thinkingLevelState
     }
 
     // Dropdown expanding state
     var modelDropdownExpanded by remember { mutableStateOf(false) }
-    val geminiModels = listOf("gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite-preview")
+    val geminiModels = listOf("gemini-3.1-flash-lite-preview", "gemini-3.5-flash", "gemini-3.1-pro-preview")
 
     Column(
         modifier = modifier
@@ -136,7 +145,7 @@ fun AISettingsScreen(
                             onClick = {
                                 apiProtocol = "gemini"
                                 apiEndpoint = "https://generativelanguage.googleapis.com/"
-                                selectedModel = "gemini-3.5-flash"
+                                selectedModel = "gemini-3.1-flash-lite-preview"
                                 viewModel.clearValidationResult()
                             },
                             colors = ButtonDefaults.buttonColors(
@@ -156,8 +165,8 @@ fun AISettingsScreen(
                         Button(
                             onClick = {
                                 apiProtocol = "openai"
-                                apiEndpoint = "https://api.openai.com/v1/"
-                                selectedModel = "gpt-4o"
+                                apiEndpoint = "https://api.groq.com/openai/v1"
+                                selectedModel = "gpt-oss-20b"
                                 viewModel.clearValidationResult()
                             },
                             colors = ButtonDefaults.buttonColors(
@@ -200,7 +209,7 @@ fun AISettingsScreen(
                         },
                         label = { Text("API Endpoint Service URL") },
                         placeholder = {
-                            if (apiProtocol == "openai") Text("https://api.openai.com/v1/")
+                            if (apiProtocol == "openai") Text("https://api.groq.com/openai/v1")
                             else Text("https://generativelanguage.googleapis.com/")
                         },
                         singleLine = true,
@@ -427,7 +436,90 @@ fun AISettingsScreen(
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp)
+                            .padding(top = 8.dp, bottom = 16.dp)
+                    )
+
+                    if (apiProtocol == "gemini") {
+                        Text(
+                            "Gemini Thinking Level",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        var thinkingDropdownExpanded by remember { mutableStateOf(false) }
+                        val thinkingOptions = listOf("none", "low", "high")
+                        Box(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            OutlinedTextField(
+                                value = thinkingLevel,
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = {
+                                    IconButton(onClick = { thinkingDropdownExpanded = true }) {
+                                        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "Dropdown thinking")
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { thinkingDropdownExpanded = true }
+                            )
+
+                            DropdownMenu(
+                                expanded = thinkingDropdownExpanded,
+                                onDismissRequest = { thinkingDropdownExpanded = false },
+                                modifier = Modifier.fillMaxWidth(0.9f)
+                            ) {
+                                thinkingOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option.capitalize(), fontSize = 14.sp) },
+                                        onClick = {
+                                            thinkingLevel = option
+                                            thinkingDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // SEARCH API KEYS
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "SEARCH PROVIDER APIS",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 11.sp,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = searchTavilyKey,
+                        onValueChange = { searchTavilyKey = it },
+                        label = { Text("Tavily API Key (Optional)") },
+                        placeholder = { Text("tvly-...") },
+                        singleLine = true,
+                        visualTransformation = if (isApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = searchBraveKey,
+                        onValueChange = { searchBraveKey = it },
+                        label = { Text("Brave Search API Key (Optional)") },
+                        placeholder = { Text("BSAE...") },
+                        singleLine = true,
+                        visualTransformation = if (isApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -459,7 +551,10 @@ fun AISettingsScreen(
                                 protocol = apiProtocol,
                                 systemPromptText = systemPrompt,
                                 temp = tempVal,
-                                maxToks = parsedLimit
+                                maxToks = parsedLimit,
+                                tavilyKey = searchTavilyKey,
+                                braveKey = searchBraveKey,
+                                thinkingLevel = thinkingLevel
                             )
                         }
                     }
@@ -477,7 +572,7 @@ fun AISettingsScreen(
 
             AnimatedVisibility(visible = showUrlError) {
                 Text(
-                    text = "⚠️ Malformed API Endpoint. Setup requires a full valid address protocol (e.g. https://api.openai.com/v1/).",
+                    text = "⚠️ Malformed API Endpoint. Setup requires a full valid address protocol (e.g. https://api.groq.com/openai/v1).",
                     color = MaterialTheme.colorScheme.error,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,

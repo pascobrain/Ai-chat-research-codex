@@ -70,6 +70,8 @@ secrets {
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.auth)
+  implementation(libs.firebase.firestore)
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
@@ -116,6 +118,15 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
+  implementation(libs.markwon.core) {
+    exclude(group = "org.jetbrains", module = "annotations-java5")
+  }
+  implementation(libs.markwon.syntax.highlight) {
+    exclude(group = "org.jetbrains", module = "annotations-java5")
+  }
+  implementation(libs.markwon.ext.tables) {
+    exclude(group = "org.jetbrains", module = "annotations-java5")
+  }
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }

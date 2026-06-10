@@ -13,6 +13,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.example.data.remote.FirebaseSyncManager
+import com.example.data.remote.SyncStatus
 
 sealed interface Screen {
     object Chat : Screen
@@ -67,6 +69,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // --- Observe Messages for Active Conversation ---
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val messages: StateFlow<List<MessageEntity>> = _currentConversationId
         .flatMapLatest { id ->
             if (id != null) {
@@ -123,6 +126,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _maxTokens = MutableStateFlow(2048)
     val maxTokens: StateFlow<Int> = _maxTokens.asStateFlow()
 
+    private val _tavilyApiKey = MutableStateFlow("")
+    val tavilyApiKey: StateFlow<String> = _tavilyApiKey.asStateFlow()
+
+    private val _braveApiKey = MutableStateFlow("")
+    val braveApiKey: StateFlow<String> = _braveApiKey.asStateFlow()
+
+    private val _geminiThinkingLevel = MutableStateFlow("none")
+    val geminiThinkingLevel: StateFlow<String> = _geminiThinkingLevel.asStateFlow()
+
+    private val _activeSearchProvider = MutableStateFlow("auto")
+    val activeSearchProvider: StateFlow<String> = _activeSearchProvider.asStateFlow()
+
+    val syncStatus = FirebaseSyncManager.syncStatus
+
     private val _accentColor = MutableStateFlow(AccentColor.BLUE)
     val accentColor: StateFlow<AccentColor> = _accentColor.asStateFlow()
 
@@ -163,6 +180,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _systemPrompt.value = repository.getSetting("system_prompt", "")
             _temperature.value = repository.getSetting("temperature", "0.7").toFloatOrNull() ?: 0.7f
             _maxTokens.value = repository.getSetting("max_tokens", "2048").toIntOrNull() ?: 2048
+            _tavilyApiKey.value = repository.getSetting("tavily_api_key", "")
+            _braveApiKey.value = repository.getSetting("brave_api_key", "")
+            _geminiThinkingLevel.value = repository.getSetting("gemini_thinking_level", "none")
+            _activeSearchProvider.value = repository.getSetting("active_search_provider", "auto")
             
             val savedHex = repository.getSetting("accent_color", "#1E88E5")
             _accentColor.value = AccentColor.values().find { it.hex == savedHex } ?: AccentColor.BLUE
@@ -215,6 +236,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeSidebar() {
         _isSidebarOpen.value = false
+    }
+
+    fun setActiveSearchProvider(provider: String) {
+        _activeSearchProvider.value = provider
+        viewModelScope.launch {
+            repository.saveSetting("active_search_provider", provider)
+        }
     }
 
     // --- Settings UI Save Function ---
@@ -270,7 +298,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         protocol: String,
         systemPromptText: String,
         temp: Float,
-        maxToks: Int
+        maxToks: Int,
+        tavilyKey: String,
+        braveKey: String,
+        thinkingLevel: String = "none"
     ) {
         viewModelScope.launch {
             if (endpoint.isBlank()) {
@@ -284,6 +315,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _systemPrompt.value = systemPromptText
             _temperature.value = temp
             _maxTokens.value = maxToks
+            _tavilyApiKey.value = tavilyKey
+            _braveApiKey.value = braveKey
+            _geminiThinkingLevel.value = thinkingLevel
 
             repository.saveSetting("api_endpoint", endpoint)
             repository.saveSetting("api_key", key)
@@ -292,6 +326,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             repository.saveSetting("system_prompt", systemPromptText)
             repository.saveSetting("temperature", temp.toString())
             repository.saveSetting("max_tokens", maxToks.toString())
+            repository.saveSetting("tavily_api_key", tavilyKey)
+            repository.saveSetting("brave_api_key", braveKey)
+            repository.saveSetting("gemini_thinking_level", thinkingLevel)
 
             _snackbarMessage.emit("AI Custom Settings saved successfully!")
             _currentScreen.value = Screen.Chat
@@ -423,6 +460,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             repository.deleteKnowledgeEntry(id)
             _selectedContextEntries.value = _selectedContextEntries.value - id
             _snackbarMessage.emit("Knowledge base item deleted.")
+        }
+    }
+
+    // --- Network Diagnostics ---
+    val connectionStatus = com.example.util.DiagnosticLogger.connectionStatus
+
+    fun sendDiagnosticPing() {
+        viewModelScope.launch {
+            _snackbarMessage.emit("Sending ping...")
+            com.example.util.DiagnosticLogger.logRequest("Diagnostic Ping")
+            try {
+                // Call repository directly bypassing local DB
+                val result = repository.queryAI(
+                    prompt = "Respond exactly with: 'PONG! connection successful.'",
+                    conversationId = -1L, // Fake ID
+                    history = emptyList(),
+                    knowledgeContext = ""
+                )
+                if (result.isSuccess) {
+                    _snackbarMessage.emit("Ping Success: ${result.getOrNull()}")
+                } else {
+                    _snackbarMessage.emit("Ping Failed: ${result.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                com.example.util.DiagnosticLogger.logError(e.message ?: "Unknown ping error")
+                _snackbarMessage.emit("Ping Error: ${e.message}")
+            }
         }
     }
 

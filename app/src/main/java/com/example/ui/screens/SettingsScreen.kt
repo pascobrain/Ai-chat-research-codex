@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.viewmodel.AccentColor
 import com.example.ui.viewmodel.ChatViewModel
+import com.example.data.remote.SyncStatus
 import com.example.ui.viewmodel.Screen
 import java.net.URL
 
@@ -66,6 +67,8 @@ fun SettingsScreen(
     var autoSuggest by remember { mutableStateOf(autoSuggestState) }
     var showResearch by remember { mutableStateOf(showResearchState) }
     var enableHighlight by remember { mutableStateOf(enableHighlightState) }
+
+    val syncStatus by viewModel.syncStatus.collectAsState()
     var fontSizeLevel by remember { mutableStateOf(fontSizeState) }
     var isApiKeyVisible by remember { mutableStateOf(false) }
 
@@ -483,6 +486,99 @@ fun SettingsScreen(
                             checked = enableHighlight,
                             onCheckedChange = { enableHighlight = it }
                         )
+                    }
+                }
+            }
+
+            // SECTION 4: Cloud Sync & Authentication
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "CLOUD SYNC & AUTHENTICATION",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 12.sp,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val statusEmoji = when (syncStatus) {
+                            SyncStatus.SYNCED -> "✅ Synced to Firestore"
+                            SyncStatus.SYNCING -> "🔄 Synchronizing..."
+                            SyncStatus.OFFLINE -> "🚫 Offline / Not logged in"
+                            SyncStatus.ERROR -> "❌ Sync Error"
+                            SyncStatus.NOT_CONFIGURED -> "⚠️ Firebase Not Initialized"
+                        }
+                        Text(text = "Status: ", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(text = statusEmoji, fontSize = 14.sp, color = if (syncStatus == SyncStatus.SYNCED) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface)
+                    }
+
+                    if (syncStatus == SyncStatus.NOT_CONFIGURED) {
+                        Text(
+                            text = "To enable real Cloud Firestore sync and Auth across devices, you must provide a valid google-services.json file to your Android project.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                    } else if (syncStatus == SyncStatus.OFFLINE) {
+                        Button(
+                            onClick = { /* Trigger Google Auth Sign In */ },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE3F2FD), contentColor = Color.Black)
+                        ) {
+                            Icon(imageVector = Icons.Default.Person, contentDescription = "Sign in")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Sign In With Google")
+                        }
+                    } else if (syncStatus == SyncStatus.SYNCED || syncStatus == SyncStatus.SYNCING) {
+                        OutlinedButton(
+                            onClick = { /* Sign out */ },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Sign Out")
+                        }
+                    }
+                }
+            }
+            
+            // SECTION 5: Network Diagnostics
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "NETWORK DIAGNOSTICS",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 12.sp,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    
+                    Text(
+                        text = "Test connectivity without saving to the local database.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    OutlinedButton(
+                        onClick = { viewModel.sendDiagnosticPing() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(imageVector = Icons.Default.NetworkCheck, contentDescription = "Ping")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Send Dummy 'Ping' Request")
                     }
                 }
             }

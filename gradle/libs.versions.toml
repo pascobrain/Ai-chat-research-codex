@@ -86,7 +86,12 @@ roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", versi
 roborazzi-compose = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose", version.ref = "roborazzi" }
 roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
+firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
 firebase-ai = { group = "com.google.firebase", name = "firebase-ai" }
+markwon-core = { group = "io.noties.markwon", name = "core", version = "4.6.2" }
+markwon-syntax-highlight = { group = "io.noties.markwon", name = "syntax-highlight", version = "4.6.2" }
+markwon-ext-tables = { group = "io.noties.markwon", name = "ext-tables", version = "4.6.2" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

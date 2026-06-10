@@ -19,12 +19,14 @@ import com.example.ui.screens.AISettingsScreen
 import com.example.ui.screens.SidebarDrawer
 import com.example.ui.viewmodel.ChatViewModel
 import com.example.ui.viewmodel.Screen
+import com.example.data.remote.FirebaseSyncManager
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        FirebaseSyncManager.initialize(this)
         enableEdgeToEdge()
 
         setContent {
