@@ -3,7 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,6 +69,8 @@ fun MainChatScreen(
     var tts by remember { mutableStateOf<android.speech.tts.TextToSpeech?>(null) }
     var currentlySpeakingMsgId by remember { mutableStateOf<Long?>(null) }
     var menuMessage by remember { mutableStateOf<MessageEntity?>(null) }
+    var editingMessageId by remember { mutableStateOf<Long?>(null) }
+    var editingText by remember { mutableStateOf("") }
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
 
     DisposableEffect(context) {
@@ -107,15 +109,21 @@ fun MainChatScreen(
     val inputText by viewModel.inputText.collectAsState()
     val suggestions by viewModel.suggestions.collectAsState()
     val isAnalyzing by viewModel.isAnalyzing.collectAsState()
+    val aiActionStatus by viewModel.aiActionStatus.collectAsState()
+    val isEnhancing by viewModel.isEnhancing.collectAsState()
     val convTitle by viewModel.currentConversationTitle.collectAsState()
     val currentConvId by viewModel.currentConversationId.collectAsState()
     val darkThemeState by viewModel.isDarkTheme.collectAsState()
+    val apiProtocol by viewModel.apiProtocol.collectAsState()
+    val apiError by viewModel.apiError.collectAsState()
+    val e2bApiKey by viewModel.e2bApiKey.collectAsState()
 
     // Settings & Knowledge references
     val knowledgeEntries by viewModel.knowledgeEntries.collectAsState()
     val selectedContextEntries by viewModel.selectedContextEntries.collectAsState()
     val fontSizeLevel by viewModel.fontSizeLevel.collectAsState()
     val isSyntaxHighlightingEnabled by viewModel.enableSyntaxHighlighting.collectAsState()
+    val messagesLimit by viewModel.messagesLimit.collectAsState()
 
     // Title editing variables
     var isEditingTitle by remember { mutableStateOf(false) }
@@ -139,14 +147,27 @@ fun MainChatScreen(
     }
 
     // AutoScroll to latest messages on change
-    LaunchedEffect(messages.size, isAnalyzing, messageBusTrigger) {
+    val lastMessageLength = messages.lastOrNull()?.content?.length ?: 0
+    LaunchedEffect(messages.size, lastMessageLength, isAnalyzing, messageBusTrigger) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            if (isAnalyzing) {
+                listState.scrollToItem(messages.size - 1)
+            } else {
+                listState.animateScrollToItem(messages.size - 1)
+            }
         }
     }
 
     // Moshi deserializer for research links
-    val moshi = remember { Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build() }
+    val moshi = remember {
+        val builder = Moshi.Builder()
+        try {
+            builder.addLast(KotlinJsonAdapterFactory())
+        } catch (t: Throwable) {
+            android.util.Log.w("MainChatScreen", "KotlinJsonAdapterFactory not available", t)
+        }
+        builder.build()
+    } //
     val researchListType = remember { Types.newParameterizedType(List::class.java, ResearchLink::class.java) }
     val researchAdapter = remember { moshi.adapter<List<ResearchLink>>(researchListType) }
 
@@ -185,6 +206,8 @@ fun MainChatScreen(
                                 }
                                 .padding(vertical = 4.dp, horizontal = 8.dp)
                         ) {
+                            AnimatedProviderLogo(protocol = apiProtocol)
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = convTitle,
                                 fontWeight = FontWeight.Bold,
@@ -204,8 +227,12 @@ fun MainChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { viewModel.toggleSidebar() }) {
-                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Open sidebar Drawer")
+                    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+                    val isWideScreen = configuration.screenWidthDp >= 720
+                    if (!isWideScreen) {
+                        IconButton(onClick = { viewModel.toggleSidebar() }) {
+                            Icon(imageVector = Icons.Default.Menu, contentDescription = "Open sidebar Drawer")
+                        }
                     }
                 },
                 actions = {
@@ -260,6 +287,65 @@ fun MainChatScreen(
                         )
                     }
 
+                    // Provider Switcher Pill Dropdown in Toolbar
+                    var isProviderDropdownOpen by remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.padding(end = 4.dp).align(Alignment.CenterVertically)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { isProviderDropdownOpen = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            AnimatedProviderLogo(protocol = apiProtocol, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = apiProtocol.uppercase(),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Select Provider",
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = isProviderDropdownOpen,
+                            onDismissRequest = { isProviderDropdownOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Gemini", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
+                                leadingIcon = { AnimatedProviderLogo("gemini", modifier = Modifier.size(16.dp)) },
+                                onClick = {
+                                    viewModel.selectProviderProtocol("gemini")
+                                    isProviderDropdownOpen = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Groq", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
+                                leadingIcon = { AnimatedProviderLogo("groq", modifier = Modifier.size(16.dp)) },
+                                onClick = {
+                                    viewModel.selectProviderProtocol("groq")
+                                    isProviderDropdownOpen = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("NVIDIA NIM", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
+                                leadingIcon = { AnimatedProviderLogo("nvidia", modifier = Modifier.size(16.dp)) },
+                                onClick = {
+                                    viewModel.selectProviderProtocol("nvidia")
+                                    isProviderDropdownOpen = false
+                                }
+                            )
+                        }
+                    }
+
                     // Search toggle
                     IconButton(onClick = { isSearchSettingsSheetOpen = true }) {
                         Icon(
@@ -273,6 +359,43 @@ fun MainChatScreen(
                         Icon(
                             imageVector = if (darkThemeState) Icons.Default.LightMode else Icons.Default.DarkMode,
                             contentDescription = "Toggle mode theme"
+                        )
+                    }
+
+                    // Export button
+                    IconButton(onClick = {
+                        val markdown = viewModel.exportChatHistoryAsMarkdown()
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, markdown)
+                            putExtra(Intent.EXTRA_SUBJECT, "Chat History: $convTitle")
+                        }
+                        context.startActivity(Intent.createChooser(sendIntent, "Export chat"))
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Export chat history"
+                        )
+                    }
+
+                    // Share for Collaboration
+                    IconButton(onClick = {
+                        val sessionId = viewModel.shareChatSession()
+                        if (!sessionId.isNullOrBlank()) {
+                            val link = "https://aistudio.collaboration/join/$sessionId"
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, "Join my chat session: $link")
+                                putExtra(Intent.EXTRA_SUBJECT, "Collaborative Chat Session")
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share chat session"))
+                        } else {
+                            Toast.makeText(context, "Collaboration requires active Firebase configuration.", Toast.LENGTH_LONG).show()
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.People,
+                            contentDescription = "Share for collaboration"
                         )
                     }
                 },
@@ -328,6 +451,152 @@ fun MainChatScreen(
                     .fillMaxSize()
                     .imePadding()
             ) {
+                // Collapsible Dynamic Error and Recovery Selector Banner
+                AnimatedVisibility(
+                    visible = apiError != null,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    apiError?.let { errText ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            tonalElevation = 4.dp,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = "API Error",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "API-Verbindung fehlgeschlagen",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = errText,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.15f))
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    var isErrorDropdownOpen by remember { mutableStateOf(false) }
+                                    
+                                    // Switch Provider Dropdown in Error Card
+                                    Box {
+                                        OutlinedButton(
+                                            onClick = { isErrorDropdownOpen = true },
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            modifier = Modifier.height(36.dp)
+                                        ) {
+                                            AnimatedProviderLogo(protocol = apiProtocol, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(text = "Wechseln (${apiProtocol.uppercase()})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        }
+                                        
+                                        DropdownMenu(
+                                            expanded = isErrorDropdownOpen,
+                                            onDismissRequest = { isErrorDropdownOpen = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Gemini", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
+                                                leadingIcon = { AnimatedProviderLogo("gemini", modifier = Modifier.size(14.dp)) },
+                                                onClick = {
+                                                    viewModel.selectProviderProtocol("gemini")
+                                                    isErrorDropdownOpen = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Groq", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
+                                                leadingIcon = { AnimatedProviderLogo("groq", modifier = Modifier.size(14.dp)) },
+                                                onClick = {
+                                                    viewModel.selectProviderProtocol("groq")
+                                                    isErrorDropdownOpen = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("NVIDIA NIM", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
+                                                leadingIcon = { AnimatedProviderLogo("nvidia", modifier = Modifier.size(14.dp)) },
+                                                onClick = {
+                                                    viewModel.selectProviderProtocol("nvidia")
+                                                    isErrorDropdownOpen = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    
+                                    TextButton(
+                                        onClick = { viewModel.clearApiError() },
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                                        ),
+                                        modifier = Modifier.height(36.dp)
+                                    ) {
+                                        Text("Schließen", fontSize = 11.sp)
+                                    }
+                                    
+                                    Button(
+                                        onClick = {
+                                            val lastUserMsg = messages.lastOrNull { it.role == "user" }
+                                            if (lastUserMsg != null) {
+                                                // Trigger regeneration / retry for last sent message
+                                                viewModel.clearApiError()
+                                                val lastModelMsg = messages.lastOrNull()
+                                                if (lastModelMsg != null && lastModelMsg.role == "model") {
+                                                    viewModel.regenerateResponse(lastModelMsg)
+                                                } else {
+                                                    // Fallback, pretend to regenerate on a pseudo-empty message
+                                                    val mockModel = MessageEntity(id = -1, conversationId = lastUserMsg.conversationId, role = "model", content = "")
+                                                    viewModel.regenerateResponse(mockModel)
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.error,
+                                            contentColor = MaterialTheme.colorScheme.onError
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.height(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Wiederholen", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Scrollable Chat Window Area
                 if (isMessagesLoading) {
                     Box(
@@ -383,8 +652,8 @@ fun MainChatScreen(
                                 color = MaterialTheme.colorScheme.onBackground
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Ground suggestions are dynamically active. Tap below or type code prompts to begin searching.",
+                             Text(
+                                text = "Ground suggestions and Interactive Generative UI are active. Ask to create quizzes, timers, flashcards, checklists, or polls!",
                                 fontSize = 12.sp,
                                 textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.outline,
@@ -403,9 +672,10 @@ fun MainChatScreen(
 
                             // Suggested Starting Widgets
                             listOf(
-                                "explain differences between Gemini 1.5 Flash and Pro",
+                                "Create an interactive Quiz about Kotlin Coroutines",
+                                "Provide a checklist for launching a production Android App",
                                 "best practices for SQLite or Room database in Android",
-                                "how to structure clean architecture with MVVM in Kotlin"
+                                "compare the differences between Gemini 1.5 Flash and Pro"
                             ).forEach { suggestPrompt ->
                                 Card(
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -448,17 +718,50 @@ fun MainChatScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         key = { it.id },
+                        headerContent = {
+                            if (messages.size >= messagesLimit) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Button(
+                                            onClick = { viewModel.loadEarlierMessages() },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                            ),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ArrowUpward,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Ältere Nachrichten laden", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         footerContent = {
                             if (isAnalyzing) {
                                 val latestMessageIsModelStreaming = messages.lastOrNull()?.let { it.role == "model" && it.content.isNotBlank() } ?: false
                                 if (!latestMessageIsModelStreaming) {
                                     item {
-                                        MessageBubbleSkeleton(isUser = false, showTypingDots = true)
+                                        AIEngineProcessingIndicator(
+                                            status = aiActionStatus,
+                                            provider = apiProtocol
+                                        )
                                     }
                                 }
                             }
                         }
                     ) { msg ->
+                        AnimatedMessageItem(messageId = msg.id) {
                             val isUser = msg.role == "user"
                             val timeText = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(msg.timestamp))
 
@@ -467,22 +770,10 @@ fun MainChatScreen(
                                 horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
                             ) {
                                 if (!isUser) {
-                                    // AI Avatar
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primary)
-                                            .padding(2.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AutoAwesome,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
+                                    // Animated Provider Logo Avatar
+                                    AnimatedProviderLogo(
+                                        protocol = if (msg.provider.isNotBlank()) msg.provider else apiProtocol
+                                    )
                                     Spacer(modifier = Modifier.width(8.dp))
                                 }
 
@@ -492,6 +783,50 @@ fun MainChatScreen(
                                 ) {
                                     // Chat bubble Card
                                     Box {
+                                        if (editingMessageId == msg.id) {
+                                            Card(
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = if (darkThemeState) Color(0xFF1E1E1E) else Color(0xFFF3F4F6)
+                                                ),
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(12.dp)) {
+                                                    OutlinedTextField(
+                                                        value = editingText,
+                                                        onValueChange = { editingText = it },
+                                                        modifier = Modifier.fillMaxWidth().testTag("edit_text_field_${msg.id}"),
+                                                        colors = OutlinedTextFieldDefaults.colors(
+                                                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                                                        )
+                                                    )
+                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                    Row(
+                                                        horizontalArrangement = Arrangement.End,
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    ) {
+                                                        TextButton(
+                                                            onClick = { editingMessageId = null },
+                                                            modifier = Modifier.testTag("cancel_edit_${msg.id}")
+                                                        ) {
+                                                            Text("Cancel", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                                        }
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Button(
+                                                            onClick = {
+                                                                viewModel.editMessage(msg.id, editingText)
+                                                                editingMessageId = null
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                                            modifier = Modifier.testTag("save_edit_${msg.id}")
+                                                        ) {
+                                                            Text("Save", fontSize = 12.sp, color = Color.White)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
                                         Card(
                                             colors = CardDefaults.cardColors(
                                                 containerColor = if (isUser) {
@@ -523,7 +858,8 @@ fun MainChatScreen(
                                                                 if (block.content.isNotBlank()) {
                                                                     MarkwonMarkdownText(
                                                                         markdown = block.content,
-                                                                        textColor = Color.White
+                                                                        textColor = Color.White,
+                                                                        isDarkTheme = true
                                                                     )
                                                                 }
                                                             }
@@ -535,75 +871,47 @@ fun MainChatScreen(
                                                                     CodeBlockView(
                                                                         language = block.language,
                                                                         code = block.code,
-                                                                        modifier = Modifier.padding(vertical = 4.dp)
+                                                                        modifier = Modifier.padding(vertical = 4.dp),
+                                                                        e2bApiKey = e2bApiKey
                                                                     )
                                                                 }
                                                             }
                                                         }
                                                     }
                                                 } else {
-                                                    val isCurrentlyStreaming = msg.id == messages.lastOrNull()?.id && isAnalyzing
-                                                    if (isCurrentlyStreaming) {
-                                                        val blocks = remember(msg.content) { splitMessageContent(msg.content) }
-                                                        val infiniteTransition = rememberInfiniteTransition(label = "cursor")
-                                                        val cursorAlpha by infiniteTransition.animateFloat(
-                                                            initialValue = 0f,
-                                                            targetValue = 1f,
-                                                            animationSpec = infiniteRepeatable(
-                                                                animation = tween(durationMillis = 500, easing = LinearEasing),
-                                                                repeatMode = RepeatMode.Reverse
-                                                            ),
-                                                            label = "cursorBlink"
-                                                        )
-                                                        val showCursor = cursorAlpha > 0.5f
+                                                    StreamingTextAnimationWrapper(
+                                                        text = msg.content,
+                                                        enabled = true
+                                                    ) { animatedContent ->
+                                                        val isCurrentlyStreaming = msg.id == messages.lastOrNull()?.id && isAnalyzing
+                                                        if (isCurrentlyStreaming) {
+                                                            val blocks = remember(animatedContent) { splitMessageContent(animatedContent) }
+                                                            val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+                                                            val cursorAlpha by infiniteTransition.animateFloat(
+                                                                initialValue = 0f,
+                                                                targetValue = 1f,
+                                                                animationSpec = infiniteRepeatable(
+                                                                    animation = tween(durationMillis = 500, easing = LinearEasing),
+                                                                    repeatMode = RepeatMode.Reverse
+                                                                ),
+                                                                label = "cursorBlink"
+                                                            )
+                                                            val showCursor = cursorAlpha > 0.5f
 
-                                                        Column {
-                                                            blocks.forEachIndexed { idx, block ->
-                                                                when (block) {
-                                                                    is MessageBlock.Text -> {
-                                                                        val txt = if (idx == blocks.lastIndex) {
-                                                                            block.content + (if (showCursor) " ▎" else "  ")
-                                                                        } else {
-                                                                            block.content
-                                                                        }
-                                                                        if (txt.isNotBlank() || idx == blocks.lastIndex) {
-                                                                            MarkwonMarkdownText(
-                                                                                markdown = txt,
-                                                                                textColor = MaterialTheme.colorScheme.onSurface,
-                                                                                modifier = Modifier.padding(bottom = 6.dp)
-                                                                            )
-                                                                        }
-                                                                    }
-                                                                    is MessageBlock.Code -> {
-                                                                        GenerativeUiContainer(
-                                                                            jsonCode = block.code,
-                                                                            modifier = Modifier.padding(vertical = 4.dp)
-                                                                        ) {
-                                                                            CodeBlockView(
-                                                                                language = block.language,
-                                                                                code = block.code,
-                                                                                modifier = Modifier.padding(vertical = 4.dp)
-                                                                            )
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    } else {
-                                                        TypingAnimatedTextWrapper(
-                                                            text = msg.content,
-                                                            isModel = true,
-                                                            msgTimestamp = msg.timestamp
-                                                        ) { animatedText ->
-                                                            val blocks = remember(animatedText) { splitMessageContent(animatedText) }
                                                             Column {
-                                                                blocks.forEach { block ->
+                                                                blocks.forEachIndexed { idx, block ->
                                                                     when (block) {
                                                                         is MessageBlock.Text -> {
-                                                                            if (block.content.isNotBlank()) {
+                                                                            val txt = if (idx == blocks.lastIndex) {
+                                                                                block.content + (if (showCursor) " ▎" else "  ")
+                                                                            } else {
+                                                                                block.content
+                                                                            }
+                                                                            if (txt.isNotBlank() || idx == blocks.lastIndex) {
                                                                                 MarkwonMarkdownText(
-                                                                                    markdown = block.content,
+                                                                                    markdown = txt,
                                                                                     textColor = MaterialTheme.colorScheme.onSurface,
+                                                                                    isDarkTheme = darkThemeState,
                                                                                     modifier = Modifier.padding(bottom = 6.dp)
                                                                                 )
                                                                             }
@@ -616,7 +924,39 @@ fun MainChatScreen(
                                                                                 CodeBlockView(
                                                                                     language = block.language,
                                                                                     code = block.code,
-                                                                                    modifier = Modifier.padding(vertical = 4.dp)
+                                                                                    modifier = Modifier.padding(vertical = 4.dp),
+                                                                                    e2bApiKey = e2bApiKey
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        } else {
+                                                            val blocks = remember(animatedContent) { splitMessageContent(animatedContent) }
+                                                            Column {
+                                                                blocks.forEach { block ->
+                                                                    when (block) {
+                                                                        is MessageBlock.Text -> {
+                                                                            if (block.content.isNotBlank()) {
+                                                                                MarkwonMarkdownText(
+                                                                                    markdown = block.content,
+                                                                                    textColor = MaterialTheme.colorScheme.onSurface,
+                                                                                    isDarkTheme = darkThemeState,
+                                                                                    modifier = Modifier.padding(bottom = 6.dp)
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                        is MessageBlock.Code -> {
+                                                                            GenerativeUiContainer(
+                                                                                jsonCode = block.code,
+                                                                                modifier = Modifier.padding(vertical = 4.dp)
+                                                                            ) {
+                                                                                CodeBlockView(
+                                                                                    language = block.language,
+                                                                                    code = block.code,
+                                                                                    modifier = Modifier.padding(vertical = 4.dp),
+                                                                                    e2bApiKey = e2bApiKey
                                                                                 )
                                                                             }
                                                                         }
@@ -627,6 +967,7 @@ fun MainChatScreen(
                                                     }
                                                 }
                                             }
+                                        }
                                         }
 
                                         DropdownMenu(
@@ -741,51 +1082,27 @@ fun MainChatScreen(
                                          verticalAlignment = Alignment.CenterVertically
                                      ) {
                                          Text(
-                                             text = timeText,
+                                             text = if (!isUser && msg.latencyMs > 0L) "$timeText  •  ⚡ %.2fs".format(msg.latencyMs / 1000.0) else timeText,
                                              fontSize = 10.sp,
                                              color = MaterialTheme.colorScheme.outline
                                          )
+                                         Spacer(modifier = Modifier.width(8.dp))
+                                         IconButton(
+                                             onClick = {
+                                                 editingMessageId = msg.id
+                                                 editingText = msg.content
+                                             },
+                                             modifier = Modifier.size(24.dp).testTag("edit_button_${msg.id}")
+                                         ) {
+                                             Icon(
+                                                 imageVector = Icons.Default.Edit,
+                                                 contentDescription = "Edit message content",
+                                                 tint = MaterialTheme.colorScheme.outline,
+                                                 modifier = Modifier.size(13.dp)
+                                             )
+                                         }
                                          if (!isUser) {
                                              Spacer(modifier = Modifier.width(8.dp))
-                                             val isSpeaking = currentlySpeakingMsgId == msg.id
-                                             IconButton(
-                                                 onClick = {
-                                                     val ttsInstance = tts
-                                                     if (ttsInstance != null) {
-                                                         if (isSpeaking) {
-                                                             ttsInstance.stop()
-                                                             currentlySpeakingMsgId = null
-                                                         } else {
-                                                             ttsInstance.stop()
-                                                             currentlySpeakingMsgId = msg.id
-                                                             val params = android.os.Bundle().apply {
-                                                                 putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, msg.id.toString())
-                                                             }
-                                                             val cleanSpeechText = msg.content
-                                                                 .replace(Regex("\\[([^\\]]+)\\]\\((https?://[^\\s)]+)\\)"), "$1")
-                                                                 .replace(Regex("[`*#_]"), "")
-                                                             ttsInstance.speak(
-                                                                 cleanSpeechText,
-                                                                 android.speech.tts.TextToSpeech.QUEUE_FLUSH,
-                                                                 params,
-                                                                 msg.id.toString()
-                                                             )
-                                                         }
-                                                     } else {
-                                                         Toast.makeText(context, "Text to speech not initialized", Toast.LENGTH_SHORT).show()
-                                                     }
-                                                 },
-                                                 modifier = Modifier.size(24.dp)
-                                             ) {
-                                                 Icon(
-                                                     imageVector = if (isSpeaking) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
-                                                     contentDescription = "Speak response",
-                                                     tint = if (isSpeaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                                     modifier = Modifier.size(14.dp)
-                                                 )
-                                             }
-
-                                             Spacer(modifier = Modifier.width(4.dp))
 
                                              IconButton(
                                                  onClick = {
@@ -812,12 +1129,17 @@ fun MainChatScreen(
                         }
                     }
 
+                  }
+
                 // BOTTOM DESIGN BAR: Active Suggestions panel, Input box, contexts selection
-                CustomChatInput(
+                AppChatInput(
                     inputText = inputText,
                     onInputChange = { viewModel.onInputChange(it) },
                     onSend = { viewModel.sendMessage() },
+                    onCancel = viewModel::cancelGeneration,
                     isAnalyzing = isAnalyzing,
+                    isEnhancing = isEnhancing,
+                    onEnhanceClick = { viewModel.enhancePrompt() },
                     selectedContextEntries = selectedContextEntries,
                     onClearContext = { viewModel.clearContextSelections() },
                     onAttachClick = { isAttachPopupOpen = true },
@@ -1127,6 +1449,27 @@ fun TypingIndicatorView() {
     }
 }
 
+@Composable
+fun AnimatedMessageItem(
+    messageId: Any,
+    content: @Composable () -> Unit
+) {
+    var isVisible by remember(messageId) { mutableStateOf(false) }
+    LaunchedEffect(messageId) {
+        isVisible = true
+    }
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 350, easing = EaseOutCubic)) +
+                slideInVertically(
+                    initialOffsetY = { 32 },
+                    animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessLow)
+                )
+    ) {
+        content()
+    }
+}
+
 // Generic, robust FlatList container styled like list component but fully type-safe in Jetpack Compose
 @Composable
 fun <T> FlatList(
@@ -1136,6 +1479,7 @@ fun <T> FlatList(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     key: ((item: T) -> Any)? = null,
+    headerContent: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
     footerContent: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
     renderItem: @Composable androidx.compose.foundation.lazy.LazyItemScope.(item: T) -> Unit
 ) {
@@ -1145,6 +1489,9 @@ fun <T> FlatList(
         contentPadding = contentPadding,
         verticalArrangement = verticalArrangement
     ) {
+        if (headerContent != null) {
+            headerContent()
+        }
         items(
             items = data,
             key = key
@@ -1163,7 +1510,10 @@ fun CustomChatInput(
     inputText: String,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
+    onCancel: () -> Unit,
     isAnalyzing: Boolean,
+    isEnhancing: Boolean,
+    onEnhanceClick: () -> Unit,
     selectedContextEntries: Set<Long>,
     onClearContext: () -> Unit,
     onAttachClick: () -> Unit,
@@ -1321,7 +1671,31 @@ fun CustomChatInput(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                )
+                ),
+                trailingIcon = {
+                    if (inputText.isNotBlank()) {
+                        IconButton(
+                            onClick = onEnhanceClick,
+                            enabled = !isEnhancing && !isAnalyzing,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            if (isEnhancing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "Enhance Prompt",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             )
 
             Spacer(modifier = Modifier.width(6.dp))
@@ -1329,22 +1703,26 @@ fun CustomChatInput(
             // Send trigger
             IconButton(
                 onClick = {
-                    onSend()
-                    focusManager.clearFocus()
+                    if (isAnalyzing) {
+                        onCancel()
+                    } else {
+                        onSend()
+                        focusManager.clearFocus()
+                    }
                 },
-                enabled = inputText.isNotBlank() && !isAnalyzing,
                 modifier = Modifier
                     .clip(CircleShape)
                     .background(
-                        if (inputText.isNotBlank() && !isAnalyzing) Color(0xFF1E88E5)
+                        if (isAnalyzing) Color(0xFFD32F2F)
+                        else if (inputText.isNotBlank()) Color(0xFF1E88E5)
                         else MaterialTheme.colorScheme.surfaceVariant
                     )
                     .testTag("send_button")
             ) {
                 Icon(
-                    imageVector = Icons.Default.Send,
-                    contentDescription = "Send message",
-                    tint = if (inputText.isNotBlank() && !isAnalyzing) Color.White else MaterialTheme.colorScheme.outline
+                    imageVector = if (isAnalyzing) Icons.Default.Stop else Icons.Default.Send,
+                    contentDescription = if (isAnalyzing) "Cancel" else "Send message",
+                    tint = if (isAnalyzing || inputText.isNotBlank()) Color.White else MaterialTheme.colorScheme.outline
                 )
             }
         }
@@ -1368,26 +1746,17 @@ fun Modifier.shimmerEffect(): Modifier {
 }
 
 @Composable
-fun MessageBubbleSkeleton(isUser: Boolean, showTypingDots: Boolean = false) {
+fun MessageBubbleSkeleton(
+    isUser: Boolean,
+    showTypingDots: Boolean = false,
+    provider: String = ""
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         if (!isUser) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(14.dp)
-                )
-            }
+            AnimatedProviderLogo(protocol = provider)
             Spacer(modifier = Modifier.width(8.dp))
         }
 
@@ -1480,7 +1849,14 @@ fun exportConversation(
             )
         }
         try {
-            val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+            val moshi = Moshi.Builder().let { builder ->
+                try {
+                    builder.addLast(KotlinJsonAdapterFactory())
+                } catch (t: Throwable) {
+                    android.util.Log.w("MainChatScreen", "KotlinJsonAdapterFactory not available", t)
+                }
+                builder.build()
+            }
             val adapter = moshi.adapter<List<Map<String, String>>>(
                 Types.newParameterizedType(List::class.java, Map::class.java)
             ).indent("  ")
@@ -1544,5 +1920,36 @@ fun TypingAnimatedTextWrapper(
     }
 
     content(text.substring(0, displayedLength))
+}
+
+@Composable
+fun StreamingTextAnimationWrapper(
+    text: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable (String) -> Unit
+) {
+    if (!enabled || text.isEmpty()) {
+        content(text)
+        return
+    }
+
+    var displayedText by remember { mutableStateOf("") }
+
+    LaunchedEffect(text) {
+        if (!text.startsWith(displayedText)) {
+            displayedText = ""
+        }
+        
+        while (displayedText.length < text.length) {
+            val nextLength = (displayedText.length + 1).coerceAtMost(text.length)
+            displayedText = text.substring(0, nextLength)
+            val distance = text.length - displayedText.length
+            val delayMs = if (distance > 50) 2L else if (distance > 20) 8L else 20L
+            kotlinx.coroutines.delay(delayMs)
+        }
+    }
+
+    content(displayedText)
 }
 

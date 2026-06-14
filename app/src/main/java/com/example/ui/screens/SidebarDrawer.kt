@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import com.example.data.local.ConversationEntity
 import com.example.data.local.KnowledgeEntryEntity
 import com.example.ui.viewmodel.ChatViewModel

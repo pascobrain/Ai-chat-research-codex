@@ -20,7 +20,9 @@ data class MessageEntity(
     val content: String,
     val timestamp: Long = System.currentTimeMillis(),
     val isResearchDone: Boolean = false,
-    val researchLinksJson: String = "" // JSON list of ResearchLink
+    val researchLinksJson: String = "", // JSON list of ResearchLink
+    val provider: String = "",
+    val latencyMs: Long = 0L
 )
 
 @Entity(tableName = "knowledge_entries")

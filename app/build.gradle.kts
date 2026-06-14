@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.airesearcher.bfxpqw"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 3
+    versionName = "1.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -58,6 +58,22 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+// Dynamically generate .env file from System Environment Variables so that the Secrets Gradle Plugin
+// can correctly inject them into BuildConfig.
+val envFile = file("${rootDir}/.env")
+val keysToImport = listOf("GEMINI_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "GROQ_API_KEY", "E2B_API_KEY", "NVIDIA_API_KEY")
+val envContents = keysToImport.mapNotNull { key ->
+    val value = System.getenv(key) ?: System.getenv(key.lowercase())
+    if (!value.isNullOrBlank()) "$key=$value" else null
+}.joinToString("\n")
+
+if (envContents.isNotBlank()) {
+    envFile.writeText(envContents + "\n")
+    logger.lifecycle("Successfully generated .env from system environment variables.")
+} else {
+    logger.lifecycle("No environment variables found to create .env file; using defaults.")
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {
@@ -92,6 +108,8 @@ dependencies {
   // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.paging.runtime)
+  implementation(libs.androidx.room.paging)
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)

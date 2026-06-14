@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -19,12 +21,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 sealed interface GenerativeUiData {
@@ -38,6 +43,31 @@ sealed interface GenerativeUiData {
         val contentB: String
     ) : GenerativeUiData
     data class Metrics(val title: String, val metrics: List<PerformanceMetric>) : GenerativeUiData
+    
+    data class Quiz(
+        val title: String,
+        val question: String,
+        val options: List<String>,
+        val correctIndex: Int,
+        val explanation: String
+    ) : GenerativeUiData
+
+    data class Timer(
+        val title: String,
+        val durationSeconds: Int
+    ) : GenerativeUiData
+
+    data class Flashcard(
+        val title: String,
+        val front: String,
+        val back: String
+    ) : GenerativeUiData
+
+    data class FeedbackForm(
+        val title: String,
+        val question: String,
+        val submitButtonText: String
+    ) : GenerativeUiData
 }
 
 data class PollOption(val id: String, val text: String, val votes: Int)
@@ -115,6 +145,42 @@ fun parseGenerativeUiPayload(jsonStr: String): GenerativeUiData? {
                 }
                 GenerativeUiData.Metrics(title, metrics)
             }
+            "quiz" -> {
+                val jsonOptions = root.optJSONArray("options")
+                val options = mutableListOf<String>()
+                if (jsonOptions != null) {
+                    for (i in 0 until jsonOptions.length()) {
+                        options.add(jsonOptions.getString(i))
+                    }
+                }
+                GenerativeUiData.Quiz(
+                    title = title,
+                    question = root.optString("question", "Quiz question"),
+                    options = options,
+                    correctIndex = root.optInt("correctIndex", 0),
+                    explanation = root.optString("explanation", "Verification Details")
+                )
+            }
+            "timer" -> {
+                GenerativeUiData.Timer(
+                    title = title,
+                    durationSeconds = root.optInt("durationSeconds", 60)
+                )
+            }
+            "flashcard" -> {
+                GenerativeUiData.Flashcard(
+                    title = title,
+                    front = root.optString("front", "Front context"),
+                    back = root.optString("back", "Back explanation")
+                )
+            }
+            "feedback_form" -> {
+                GenerativeUiData.FeedbackForm(
+                    title = title,
+                    question = root.optString("question", "Feedback details"),
+                    submitButtonText = root.optString("submitButtonText", "Submit")
+                )
+            }
             else -> null
         }
     } catch (e: Exception) {
@@ -142,6 +208,10 @@ fun GenerativeUiContainer(
                 is GenerativeUiData.Checklist -> InteractiveChecklistView(data)
                 is GenerativeUiData.Comparison -> InteractiveComparisonView(data)
                 is GenerativeUiData.Metrics -> InteractiveMetricsView(data)
+                is GenerativeUiData.Quiz -> InteractiveQuizView(data)
+                is GenerativeUiData.Timer -> InteractiveTimerView(data)
+                is GenerativeUiData.Flashcard -> InteractiveFlashcardView(data)
+                is GenerativeUiData.FeedbackForm -> InteractiveFeedbackFormView(data)
             }
         }
     }
@@ -622,6 +692,626 @@ fun InteractiveMetricsView(data: GenerativeUiData.Metrics) {
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun InteractiveQuizView(data: GenerativeUiData.Quiz) {
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+    val correctIndex = data.correctIndex
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🎓", fontSize = 16.sp)
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = data.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            
+            Text(
+                text = data.question,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 20.sp,
+                modifier = Modifier.padding(bottom = 14.dp)
+            )
+            
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                data.options.forEachIndexed { index, option ->
+                    val isSelected = selectedIndex == index
+                    val isCorrectIdx = index == correctIndex
+                    val isAnswered = selectedIndex != null
+                    
+                    val cardBgColor = when {
+                        isAnswered && isCorrectIdx -> Color(0xFF2E7D32).copy(alpha = 0.12f)
+                        isAnswered && isSelected && !isCorrectIdx -> Color(0xFFD32F2F).copy(alpha = 0.12f)
+                        isSelected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                        else -> Color.Transparent
+                    }
+                    
+                    val cardBorderColor = when {
+                        isAnswered && isCorrectIdx -> Color(0xFF2E7D32)
+                        isAnswered && isSelected && !isCorrectIdx -> Color(0xFFD32F2F)
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.outlineVariant
+                    }
+                    
+                    val cardBorderWidth = if (isSelected || (isAnswered && isCorrectIdx)) 2.dp else 1.dp
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(cardBgColor)
+                            .clickable(enabled = !isAnswered) {
+                                selectedIndex = index
+                            }
+                            .border(cardBorderWidth, cardBorderColor, RoundedCornerShape(10.dp))
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val letter = ('A' + index).toString()
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isAnswered && isCorrectIdx -> Color(0xFF2E7D32)
+                                        isAnswered && isSelected && !isCorrectIdx -> Color(0xFFD32F2F)
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = letter,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isAnswered && (isCorrectIdx || isSelected)) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.width(12.dp))
+                        
+                        Text(
+                            text = option,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        
+                        if (isAnswered) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = when {
+                                    isCorrectIdx -> "✅"
+                                    isSelected -> "❌"
+                                    else -> ""
+                                },
+                                fontSize = 16.sp
+                            )
+                        }
+                    }
+                }
+            }
+            
+            if (selectedIndex != null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f))
+                        .border(
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .padding(14.dp)
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("💡", fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (selectedIndex == correctIndex) "Correct Answer!" else "Incorrect, but here is why:",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selectedIndex == correctIndex) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (data.explanation.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = data.explanation,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                lineHeight = 18.sp
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(10.dp))
+                        TextButton(
+                            onClick = { selectedIndex = null },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("Reset Quiz", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun InteractiveTimerView(data: GenerativeUiData.Timer) {
+    var timeLeft by remember { mutableStateOf(data.durationSeconds) }
+    var isRunning by remember { mutableStateOf(false) }
+    val totalDuration = remember { data.durationSeconds }
+    
+    LaunchedEffect(isRunning, timeLeft) {
+        if (isRunning && timeLeft > 0) {
+            delay(1000)
+            timeLeft--
+            if (timeLeft == 0) {
+                isRunning = false
+            }
+        }
+    }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("⏱️", fontSize = 16.sp)
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = data.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            val progress = remember(timeLeft, totalDuration) {
+                if (totalDuration > 0) timeLeft.toFloat() / totalDuration else 0f
+            }
+            val progressAnimated by animateFloatAsState(
+                targetValue = progress,
+                animationSpec = tween(500),
+                label = "timerProgress"
+            )
+            
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(120.dp)
+            ) {
+                CircularProgressIndicator(
+                    progress = { progressAnimated },
+                    modifier = Modifier.fillMaxSize(),
+                    color = if (timeLeft < 10) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary,
+                    strokeWidth = 6.dp,
+                    trackColor = MaterialTheme.colorScheme.outlineVariant
+                )
+                
+                val minutes = timeLeft / 60
+                val seconds = timeLeft % 60
+                val displayStr = String.format("%02d:%02d", minutes, seconds)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = displayStr,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (isRunning) "ACTIVE" else if (timeLeft == 0) "FINISHED" else "PAUSED",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                        color = if (isRunning) Color(0xFF2E7D32) else MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(14.dp))
+            
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        timeLeft = (timeLeft - 30).coerceAtLeast(0)
+                    },
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Text("-30s", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                
+                Button(
+                    onClick = { isRunning = !isRunning },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isRunning) Color(0xFFFFA000) else MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text(
+                        text = if (isRunning) "Pause" else "Start",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+                
+                IconButton(
+                    onClick = {
+                        timeLeft = (timeLeft + 30).coerceAtMost(totalDuration * 2)
+                    },
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Text("+30s", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                
+                IconButton(
+                    onClick = {
+                        timeLeft = totalDuration
+                        isRunning = false
+                    },
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Text("🔄", fontSize = 11.sp)
+                }
+            }
+            
+            if (timeLeft == 0) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2E7D32).copy(alpha = 0.15f))
+                        .padding(8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "🎉 Time is up! Focus Block accomplished.",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2E7D32)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun InteractiveFlashcardView(data: GenerativeUiData.Flashcard) {
+    var isFlipped by remember { mutableStateOf(false) }
+    
+    val rotation by animateFloatAsState(
+        targetValue = if (isFlipped) 180f else 0f,
+        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        label = "cardFlip"
+    )
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(150.dp)
+            .clickable { isFlipped = !isFlipped }
+            .graphicsLayer {
+                rotationY = rotation
+                cameraDistance = 12 * density
+            },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            if (rotation <= 90f) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("💡", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = data.title,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "TAP TO FLIP",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.5.sp,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                    
+                    Text(
+                        text = data.front,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                    
+                    Text(
+                        text = "Question Side",
+                        fontSize = 9.sp,
+                        color = MaterialTheme.colorScheme.outline,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { rotationY = 180f }
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🔑", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = data.title + " (Solution)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2E7D32),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "SHOW FRONT",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.5.sp,
+                            color = Color(0xFF2E7D32)
+                        )
+                    }
+                    
+                    Text(
+                        text = data.back,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                    
+                    Text(
+                        text = "Answer Side",
+                        fontSize = 9.sp,
+                        color = Color(0xFF2E7D32),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun InteractiveFeedbackFormView(data: GenerativeUiData.FeedbackForm) {
+    var selectedRating by remember { mutableStateOf(0) }
+    var commentText by remember { mutableStateOf("") }
+    var isSubmitted by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("⭐", fontSize = 16.sp)
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = data.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            
+            if (!isSubmitted) {
+                Text(
+                    text = data.question,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for (i in 1..5) {
+                        val isStarred = i <= selectedRating
+                        Text(
+                            text = if (isStarred) "⭐" else "☆",
+                            fontSize = 32.sp,
+                            modifier = Modifier
+                                .clickable { selectedRating = i }
+                        )
+                    }
+                }
+                
+                OutlinedTextField(
+                    value = commentText,
+                    onValueChange = { commentText = it },
+                    placeholder = { Text("Add any extra comments...", fontSize = 13.sp) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Button(
+                    onClick = {
+                        if (selectedRating > 0) {
+                            isSubmitted = true
+                        }
+                    },
+                    enabled = selectedRating > 0,
+                    modifier = Modifier.align(Alignment.End),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(data.submitButtonText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF2E7D32).copy(alpha = 0.1f))
+                        .border(1.dp, Color(0xFF2E7D32).copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        .padding(14.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        Text("🎉", fontSize = 32.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Thank you for your feedback!",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2E7D32)
+                        )
+                        Text(
+                            text = "Rating registered: $selectedRating Star${if (selectedRating > 1) "s" else ""}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        if (commentText.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "\"$commentText\"",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        TextButton(onClick = {
+                            isSubmitted = false
+                            selectedRating = 0
+                            commentText = ""
+                        }) {
+                            Text("Resubmit", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
     }

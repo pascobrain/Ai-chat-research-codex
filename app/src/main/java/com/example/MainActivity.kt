@@ -6,8 +6,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -31,6 +35,18 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val viewModel: ChatViewModel = viewModel()
+            
+            // Handle Deep Link
+            LaunchedEffect(Unit) {
+                val data = intent?.data
+                if (data != null && data.toString().contains("/join/")) {
+                    val sessionId = data.lastPathSegment
+                    if (!sessionId.isNullOrBlank()) {
+                        viewModel.joinCollaboration(sessionId)
+                    }
+                }
+            }
+            
             val isDark by viewModel.isDarkTheme.collectAsState()
             val accentColor by viewModel.accentColor.collectAsState()
 
@@ -98,39 +114,82 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                ModalNavigationDrawer(
-                    drawerState = drawerState,
-                    drawerContent = {
-                        ModalDrawerSheet {
-                            SidebarDrawer(viewModel = viewModel)
+                val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+                val isWideScreen = configuration.screenWidthDp >= 720
+
+                if (isWideScreen) {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        SidebarDrawer(
+                            viewModel = viewModel,
+                            modifier = Modifier.width(320.dp)
+                        )
+                        VerticalDivider(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                            thickness = 1.dp
+                        )
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            AnimatedContent(
+                                targetState = currentScreen,
+                                transitionSpec = {
+                                    fadeIn() togetherWith fadeOut()
+                                },
+                                label = "screen_trans"
+                            ) { screen ->
+                                when (screen) {
+                                    is Screen.Chat -> {
+                                        MainChatScreen(viewModel = viewModel)
+                                    }
+                                    is Screen.Settings -> {
+                                        SettingsScreen(viewModel = viewModel)
+                                    }
+                                    is Screen.AISettings -> {
+                                        AISettingsScreen(viewModel = viewModel)
+                                    }
+                                    else -> {
+                                        MainChatScreen(viewModel = viewModel)
+                                    }
+                                }
+                            }
                         }
-                    },
-                    gesturesEnabled = currentScreen is Screen.Chat
-                ) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
+                    }
+                } else {
+                    ModalNavigationDrawer(
+                        drawerState = drawerState,
+                        drawerContent = {
+                            ModalDrawerSheet {
+                                SidebarDrawer(viewModel = viewModel)
+                            }
+                        },
+                        gesturesEnabled = currentScreen is Screen.Chat
                     ) {
-                        // High-performance, cross-fade animated Screen Switching container
-                        AnimatedContent(
-                            targetState = currentScreen,
-                            transitionSpec = {
-                                fadeIn() togetherWith fadeOut()
-                            },
-                            label = "screen_trans"
-                        ) { screen ->
-                            when (screen) {
-                                is Screen.Chat -> {
-                                    MainChatScreen(viewModel = viewModel)
-                                }
-                                is Screen.Settings -> {
-                                    SettingsScreen(viewModel = viewModel)
-                                }
-                                is Screen.AISettings -> {
-                                    AISettingsScreen(viewModel = viewModel)
-                                }
-                                else -> {
-                                    MainChatScreen(viewModel = viewModel)
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            // High-performance, cross-fade animated Screen Switching container
+                            AnimatedContent(
+                                targetState = currentScreen,
+                                transitionSpec = {
+                                    fadeIn() togetherWith fadeOut()
+                                },
+                                label = "screen_trans"
+                            ) { screen ->
+                                when (screen) {
+                                    is Screen.Chat -> {
+                                        MainChatScreen(viewModel = viewModel)
+                                    }
+                                    is Screen.Settings -> {
+                                        SettingsScreen(viewModel = viewModel)
+                                    }
+                                    is Screen.AISettings -> {
+                                        AISettingsScreen(viewModel = viewModel)
+                                    }
+                                    else -> {
+                                        MainChatScreen(viewModel = viewModel)
+                                    }
                                 }
                             }
                         }

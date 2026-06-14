@@ -20,12 +20,27 @@ data class GenerateContentRequest(
 
 @JsonClass(generateAdapter = true)
 data class Content(
-    val parts: List<Part>
+    val parts: List<Part>,
+    val role: String? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class Part(
-    val text: String? = null
+    val text: String? = null,
+    val functionCall: FunctionCall? = null,
+    val functionResponse: FunctionResponse? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionCall(
+    val name: String,
+    val args: Map<String, String>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionResponse(
+    val name: String,
+    val response: Map<String, String>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -49,7 +64,28 @@ data class GenerateContentResponse(
 @JsonClass(generateAdapter = true)
 data class Tool(
     val googleSearch: GoogleSearch? = null, // Just needs to be present for basic search grounding
-    val googleSearchRetrieval: GoogleSearchRetrieval? = null
+    val googleSearchRetrieval: GoogleSearchRetrieval? = null,
+    val functionDeclarations: List<FunctionDeclaration>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionDeclaration(
+    val name: String,
+    val description: String,
+    val parameters: Schema? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class Schema(
+    val type: String, // e.g., "OBJECT"
+    val properties: Map<String, SchemaProperty>? = null,
+    val required: List<String>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SchemaProperty(
+    val type: String, // e.g., "STRING"
+    val description: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -193,8 +229,8 @@ data class OpenAIContentRequest(
 
 @JsonClass(generateAdapter = true)
 data class OpenAIMessage(
-    val role: String,
-    val content: String
+    val role: String? = null,
+    val content: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -208,9 +244,15 @@ data class OpenAIChoice(
 )
 
 object RetrofitClient {
-    private val moshi = Moshi.Builder()
-        .addLast(KotlinJsonAdapterFactory())
-        .build()
+    private val moshi: Moshi by lazy {
+        val builder = Moshi.Builder()
+        try {
+            builder.addLast(KotlinJsonAdapterFactory())
+        } catch (t: Throwable) {
+            android.util.Log.w("RetrofitClient", "KotlinJsonAdapterFactory not available, reflection fallback skipped", t)
+        }
+        builder.build()
+    }
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
